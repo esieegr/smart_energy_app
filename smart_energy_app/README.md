@@ -1079,6 +1079,135 @@ Publié par l'app pour envoyer des commandes à Domoticz.
 
 *Documentation — Smart Energy App — Mars 2026*
 
+---
+
+## 18. Intégration Kafka
+
+### Architecture
+
+```
+Capteur → Domoticz → Mosquitto → Flutter App
+                                      │
+                               HTTP POST (fire-and-forget)
+                                      │
+                          Confluent REST Proxy :8082
+                                      │
+                             Kafka broker :9092
+                                      │
+                     topic: domoticz-events (rétention 7 jours)
+```
+
+Kafka est **optionnel** : si aucune IP n'est configurée, le service est silencieusement désactivé. L'app MQTT continue de fonctionner normalement.
+
+---
+
+### Installation sur Raspberry Pi
+
+Le dossier `kafka_bridge/` contient tout le nécessaire.
+
+**Prérequis :** Raspberry Pi OS 64-bit (Bullseye ou Bookworm), au moins 1 Go de RAM disponible.
+
+**Étapes :**
+
+```bash
+# 1. Copier le dossier kafka_bridge sur le Pi
+scp -r kafka_bridge/ pi@<IP_DU_PI>:~/
+
+# 2. Se connecter au Pi
+ssh pi@<IP_DU_PI>
+
+# 3. Lancer le script d'installation (installe Docker + démarre Kafka)
+cd ~/kafka_bridge
+chmod +x install_kafka_pi.sh
+sudo ./install_kafka_pi.sh
+```
+
+Le script détecte automatiquement l'IP du Pi et configure `KAFKA_ADVERTISED_LISTENERS` en conséquence.
+
+À la fin, il affiche :
+```
+  Kafka broker   : 192.168.1.50:9092
+  REST Proxy     : 192.168.1.50:8082
+  Topic          : domoticz-events
+```
+
+**Commandes utiles sur le Pi :**
+
+```bash
+docker compose -f ~/kafka_bridge/docker-compose.yml logs -f      # logs en direct
+docker compose -f ~/kafka_bridge/docker-compose.yml down          # arrêter
+docker compose -f ~/kafka_bridge/docker-compose.yml up -d         # redémarrer
+
+# Lire les messages du topic (consumer CLI)
+docker exec kafka kafka-console-consumer \
+  --bootstrap-server localhost:9092 \
+  --topic domoticz-events \
+  --from-beginning
+```
+
+---
+
+### Configuration dans l'app Flutter
+
+**Paramètres → section Kafka** :
+
+| Champ | Valeur exemple |
+|---|---|
+| IP du serveur (REST Proxy) | `192.168.1.50` |
+| Port REST Proxy | `8082` |
+| Topic Kafka | `domoticz-events` |
+
+1. Remplir les champs
+2. Appuyer sur **Tester** → vérifie la connexion au REST Proxy (GET /topics)
+3. Appuyer sur **Sauvegarder** → les settings sont persistés dans SharedPreferences
+
+Pour désactiver : vider le champ IP et sauvegarder.
+
+---
+
+### Ce qui est publié dans Kafka
+
+Chaque message reçu sur `domoticz/out` est republié tel quel dans le topic Kafka, avec tous ses champs :
+
+```json
+{
+  "Battery"    : 255,
+  "LastUpdate" : "2026-03-17 10:28:37",
+  "RSSI"       : 12,
+  "description": "",
+  "dtype"      : "General",
+  "hwid"       : "2",
+  "id"         : "00014C4A",
+  "idx"        : 11,
+  "name"       : "kWh Meter",
+  "nvalue"     : 0,
+  "org_hwid"   : "2",
+  "stype"      : "kWh",
+  "svalue1"    : "68.600",
+  "svalue2"    : "200.0",
+  "unit"       : 1
+}
+```
+
+---
+
+### Fichiers Kafka
+
+| Fichier | Rôle |
+|---|---|
+| `kafka_bridge/docker-compose.yml` | Stack Kafka (KRaft + REST Proxy) pour Docker |
+| `kafka_bridge/install_kafka_pi.sh` | Script d'installation automatique sur Raspberry Pi |
+| `lib/services/kafka_service.dart` | Client Flutter (HTTP REST Proxy) |
+
+### Clés SharedPreferences ajoutées
+
+| Clé | Type | Contenu |
+|---|---|---|
+| `kafka_broker_ip` | `String` | IP du REST Proxy |
+| `kafka_broker_port` | `int` | Port (défaut : 8082) |
+| `kafka_topic` | `String` | Nom du topic (défaut : `domoticz-events`) |
+
+
 - [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
 - [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
 - [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)

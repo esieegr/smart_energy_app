@@ -6,6 +6,7 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/domoticz_message.dart';
 import '../models/energy_history.dart';
+import 'kafka_service.dart';
 
 /// SharedPreferences key: JSON map {"meterIdx": switchIdx, ...}
 const _kMeterSwitchMap = 'meter_switch_map';
@@ -18,6 +19,9 @@ class MqttService extends ChangeNotifier {
   static const int _defaultPort = 1883;
 
   MqttServerClient? _client;
+
+  /// Optional Kafka service — set after construction via [kafkaService] setter.
+  KafkaService? _kafkaService;
 
   String _brokerIp = '';
   int _port = _defaultPort;
@@ -49,6 +53,12 @@ class MqttService extends ChangeNotifier {
   DomoticzMessage? switchForMeter(int meterIdx) {
     final swIdx = _meterToSwitch[meterIdx];
     return swIdx == null ? null : _messages[swIdx];
+  }
+
+  /// Attach a [KafkaService] so every received Domoticz message is forwarded.
+  /// Call this from main.dart after creating both services.
+  set kafkaService(KafkaService? service) {
+    _kafkaService = service;
   }
 
   // -------------------------------------------------------------------------
@@ -217,6 +227,8 @@ class MqttService extends ChangeNotifier {
           _discoveredSwitches[msg.idx] = msg;          // auto-discover
           debugPrint('[MQTT IN] → switch state: idx=${msg.idx} on=${msg.isSwitchOn}');
         }
+        // Forward every message to Kafka (fire-and-forget)
+        _kafkaService?.publishMessage(msg.toJson());
         notifyListeners();
       }
     }

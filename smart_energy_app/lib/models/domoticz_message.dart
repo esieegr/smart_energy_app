@@ -81,4 +81,23 @@ class DomoticzMessage {
 
   /// For a switch: is it ON? (nvalue=1 means On)
   bool get isSwitchOn => nvalue == 1;
+
+  /// Serialise back to JSON for forwarding to Kafka.
+  Map<String, dynamic> toJson() => {
+    'Battery'    : battery,
+    'LastUpdate' : lastUpdate,
+    'RSSI'       : rssi,
+    'description': description,
+    'dtype'      : dtype,
+    'hwid'       : hwid,
+    'id'         : id,
+    'idx'        : idx,
+    'name'       : name,
+    'nvalue'     : nvalue,
+    'org_hwid'   : orgHwid,
+    'stype'      : stype,
+    'svalue1'    : svalue1,
+    'svalue2'    : svalue2,
+    'unit'       : unit,
+  };
 }

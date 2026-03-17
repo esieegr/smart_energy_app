@@ -1,29 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/mqtt_service.dart';
+import '../services/kafka_service.dart';
 
 class SettingsScreen extends StatefulWidget {
-  final MqttService mqttService;
-  const SettingsScreen({super.key, required this.mqttService});
+  final MqttService  mqttService;
+  final KafkaService kafkaService;
+  const SettingsScreen({
+    super.key,
+    required this.mqttService,
+    required this.kafkaService,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const _keyIp      = 'mqtt_broker_ip';
-  static const _keyPort    = 'mqtt_broker_port';
+  static const _keyIp   = 'mqtt_broker_ip';
+  static const _keyPort = 'mqtt_broker_port';
 
-  final _formKey            = GlobalKey<FormState>();
-  final _ipController       = TextEditingController();
-  final _portController     = TextEditingController();
+  final _formKey        = GlobalKey<FormState>();
+  final _ipController   = TextEditingController();
+  final _portController = TextEditingController();
 
-  bool _isSaving = false;
+  // Kafka fields
+  final _kafkaIpController    = TextEditingController();
+  final _kafkaPortController  = TextEditingController();
+  final _kafkaTopicController = TextEditingController();
+
+  bool _isSaving      = false;
+  bool _isSavingKafka = false;
+  String? _kafkaTestResult;
 
   @override
   void initState() {
     super.initState();
     _loadSaved();
+    _loadKafkaSaved();
   }
 
   Future<void> _loadSaved() async {
@@ -31,6 +45,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _ipController.text   = prefs.getString(_keyIp) ?? '';
       _portController.text = (prefs.getInt(_keyPort) ?? 1883).toString();
+    });
+  }
+
+  Future<void> _loadKafkaSaved() async {
+    setState(() {
+      _kafkaIpController.text    = widget.kafkaService.brokerIp;
+      _kafkaPortController.text  = widget.kafkaService.port.toString();
+      _kafkaTopicController.text = widget.kafkaService.topic;
     });
   }
 
@@ -59,6 +81,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _saveKafka() async {
+    final ip    = _kafkaIpController.text.trim();
+    final port  = int.tryParse(_kafkaPortController.text.trim()) ?? 8082;
+    final topic = _kafkaTopicController.text.trim();
+
+    if (ip.isEmpty) {
+      await widget.kafkaService.clearSettings();
+      if (mounted) setState(() => _kafkaTestResult = 'Kafka désactivé');
+      return;
+    }
+
+    setState(() => _isSavingKafka = true);
+    await widget.kafkaService.saveSettings(
+      brokerIp: ip,
+      port:     port,
+      topic:    topic.isEmpty ? 'domoticz-events' : topic,
+    );
+    if (mounted) setState(() { _isSavingKafka = false; _kafkaTestResult = null; });
+  }
+
+  Future<void> _testKafka() async {
+    setState(() { _isSavingKafka = true; _kafkaTestResult = null; });
+    // Save first so testConnection uses the current field values
+    await _saveKafka();
+    final error = await widget.kafkaService.testConnection();
+    if (mounted) {
+      setState(() {
+        _isSavingKafka  = false;
+        _kafkaTestResult = error ?? '✓ Connexion Kafka OK';
+      });
+    }
+  }
+
   String? _validateIp(String? v) {
     if (v == null || v.trim().isEmpty) return 'IP ou nom d\'hôte requis';
     return null;
@@ -74,6 +129,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _ipController.dispose();
     _portController.dispose();
+    _kafkaIpController.dispose();
+    _kafkaPortController.dispose();
+    _kafkaTopicController.dispose();
     super.dispose();
   }
 
@@ -139,7 +197,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 label: Text(_isSaving ? 'Connexion…' : 'Connecter'),
               ),
               const SizedBox(height: 24),
-              // ── Statut ────────────────────────────────────────────────────
+              // ── Statut MQTT ────────────────────────────────────────────────
               ListenableBuilder(
                 listenable: widget.mqttService,
                 builder: (context, _) {
@@ -164,6 +222,127 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: Text(message, style: TextStyle(color: color)),
                     ),
                   ]);
+                },
+              ),
+
+              const SizedBox(height: 40),
+              const Divider(),
+              const SizedBox(height: 16),
+
+              // ── Section Kafka ──────────────────────────────────────────────
+              Row(children: [
+                Icon(Icons.stream_rounded,
+                    color: theme.colorScheme.primary, size: 20),
+                const SizedBox(width: 8),
+                Text('Kafka (optionnel)',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                'Envoie chaque message Domoticz vers un topic Kafka via le '
+                'Confluent REST Proxy (port 8082 par défaut). '
+                'Laisser vide pour désactiver.',
+                style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _kafkaIpController,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'IP du serveur (REST Proxy)',
+                  hintText: 'ex : 192.168.1.50',
+                  prefixIcon: Icon(Icons.dns_outlined),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _kafkaPortController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Port REST Proxy',
+                  hintText: '8082',
+                  prefixIcon: Icon(Icons.numbers_outlined),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _kafkaTopicController,
+                decoration: const InputDecoration(
+                  labelText: 'Topic Kafka',
+                  hintText: 'domoticz-events',
+                  prefixIcon: Icon(Icons.label_outline),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isSavingKafka ? null : _saveKafka,
+                    icon: _isSavingKafka
+                        ? const SizedBox(width: 16, height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.save_outlined),
+                    label: const Text('Sauvegarder'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: _isSavingKafka ? null : _testKafka,
+                    icon: _isSavingKafka
+                        ? const SizedBox(width: 16, height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.network_check_outlined),
+                    label: const Text('Tester'),
+                  ),
+                ),
+              ]),
+              if (_kafkaTestResult != null) ...[
+                const SizedBox(height: 12),
+                Row(children: [
+                  Icon(
+                    _kafkaTestResult!.startsWith('✓')
+                        ? Icons.check_circle_outline
+                        : Icons.error_outline,
+                    color: _kafkaTestResult!.startsWith('✓')
+                        ? Colors.green
+                        : Colors.red,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _kafkaTestResult!,
+                      style: TextStyle(
+                        color: _kafkaTestResult!.startsWith('✓')
+                            ? Colors.green
+                            : Colors.red,
+                      ),
+                    ),
+                  ),
+                ]),
+              ],
+              // Statut Kafka en temps réel
+              const SizedBox(height: 12),
+              ListenableBuilder(
+                listenable: widget.kafkaService,
+                builder: (context, _) {
+                  final ks = widget.kafkaService;
+                  if (!ks.isEnabled) return const SizedBox.shrink();
+                  final color = switch (ks.status) {
+                    KafkaStatus.idle       => Colors.green,
+                    KafkaStatus.publishing => Colors.orange,
+                    KafkaStatus.error      => Colors.red,
+                    KafkaStatus.disabled   => Colors.grey,
+                  };
+                  return Text(
+                    ks.summary,
+                    style: theme.textTheme.bodySmall?.copyWith(color: color),
+                  );
                 },
               ),
             ],

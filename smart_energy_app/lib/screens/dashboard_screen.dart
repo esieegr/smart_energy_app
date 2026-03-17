@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
 import '../models/domoticz_message.dart';
 import '../services/mqtt_service.dart';
+import '../services/kafka_service.dart';
 import 'device_detail_screen.dart';
 import 'settings_screen.dart';
 import 'switch_config_dialog.dart';
 
 class DashboardScreen extends StatelessWidget {
-  final MqttService mqttService;
+  final MqttService  mqttService;
+  final KafkaService kafkaService;
 
-  const DashboardScreen({super.key, required this.mqttService});
+  const DashboardScreen({
+    super.key,
+    required this.mqttService,
+    required this.kafkaService,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -41,8 +47,10 @@ class DashboardScreen extends StatelessWidget {
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) =>
-                    SettingsScreen(mqttService: mqttService),
+                builder: (_) => SettingsScreen(
+                  mqttService:  mqttService,
+                  kafkaService: kafkaService,
+                ),
               ),
             ),
           ),
@@ -57,7 +65,8 @@ class DashboardScreen extends StatelessWidget {
           if (status == MqttConnectionStatus.disconnected ||
               status == MqttConnectionStatus.error) {
             return _NotConnectedPlaceholder(
-              mqttService: mqttService,
+              mqttService:  mqttService,
+              kafkaService: kafkaService,
               message: mqttService.statusMessage,
             );
           }
@@ -161,7 +170,10 @@ class DashboardScreen extends StatelessWidget {
               } else {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => SettingsScreen(mqttService: mqttService),
+                    builder: (_) => SettingsScreen(
+                      mqttService:  mqttService,
+                      kafkaService: kafkaService,
+                    ),
                   ),
                 );
               }
@@ -517,11 +529,13 @@ class _RssiChip extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _NotConnectedPlaceholder extends StatelessWidget {
-  final MqttService mqttService;
+  final MqttService  mqttService;
+  final KafkaService kafkaService;
   final String message;
 
   const _NotConnectedPlaceholder({
     required this.mqttService,
+    required this.kafkaService,
     required this.message,
   });
 
@@ -552,13 +566,15 @@ class _NotConnectedPlaceholder extends StatelessWidget {
             FilledButton.icon(
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => SettingsScreen(mqttService: mqttService),
+                  builder: (_) => SettingsScreen(
+                    mqttService:  mqttService,
+                    kafkaService: kafkaService,
+                  ),
                 ),
               ),
               icon: const Icon(Icons.settings),
               label: const Text('Configurer le broker'),
-            ),
-          ],
+            ),          ],
         ),
       ),
     );

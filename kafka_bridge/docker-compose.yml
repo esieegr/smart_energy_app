@@ -1,0 +1,79 @@
+# ============================================================
+# Docker Compose — Kafka stack pour Raspberry Pi (ARM64/ARM32)
+# ============================================================
+# Images utilisées :
+#   - confluentinc/cp-kafka (KRaft mode, sans ZooKeeper)
+#   - confluentinc/cp-kafka-rest (REST Proxy sur port 8082)
+#
+# Usage :
+#   docker compose up -d
+#   docker compose logs -f
+#   docker compose down
+# ============================================================
+
+version: '3.8'
+
+services:
+
+  # ── Kafka broker (KRaft — pas besoin de ZooKeeper) ──────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    restart: unless-stopped
+    environment:
+      # KRaft mode : Kafka est à la fois broker et contrôleur
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${RASPBERRY_IP:-localhost}:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qg   # ID fixe pour KRaft (base64, 16 bytes)
+      # Rétention : 7 jours, 500 Mo max par topic
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 524288000
+      KAFKA_LOG_SEGMENT_BYTES: 104857600
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      # Performances adaptées au Pi (moins de RAM)
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms128M"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Confluent REST Proxy (API HTTP → Kafka) ──────────────────────────────────
+  kafka-rest:
+    image: confluentinc/cp-kafka-rest:7.6.1
+    container_name: kafka-rest
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_REST_HOST_NAME: kafka-rest
+      KAFKA_REST_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_REST_LISTENERS: http://0.0.0.0:8082
+      # Pas d'authentification (réseau local)
+      KAFKA_REST_CONSUMER_REQUEST_TIMEOUT_MS: 5000
+      KAFKAREST_HEAP_OPTS: "-Xmx128M -Xms64M"
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/topics"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  kafka_data:
+    driver: local
