@@ -169,7 +169,7 @@ class MqttService extends ChangeNotifier {
     _client = MqttServerClient.withPort(_brokerIp, 'flutter_smart_energy', _port)
       ..logging(on: false)
       ..keepAlivePeriod = 30
-      ..connectTimeoutPeriod = 5000
+      ..connectTimeoutPeriod = 15000
       ..onDisconnected = _onDisconnected
       ..onConnected = _onConnected
       ..onSubscribed = _onSubscribed;
