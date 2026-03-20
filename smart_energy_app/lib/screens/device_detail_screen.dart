@@ -5,7 +5,7 @@ import '../models/energy_history.dart';
 import '../services/mqtt_service.dart';
 import 'switch_config_dialog.dart';
 
-class DeviceDetailScreen extends StatelessWidget {
+class DeviceDetailScreen extends StatefulWidget {
   final int idx;
   final MqttService mqttService;
 
@@ -16,18 +16,25 @@ class DeviceDetailScreen extends StatelessWidget {
   });
 
   @override
+  State<DeviceDetailScreen> createState() => _DeviceDetailScreenState();
+}
+
+class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
+  HistoryWindow _window = HistoryWindow.h24;
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: mqttService,
+      listenable: widget.mqttService,
       builder: (context, _) {
-        final msg = mqttService.messages[idx];
-        final history = mqttService.histories[idx];
-        final switchIdx = mqttService.switchIdxForMeter(idx); // null = not configured
-        final isOn = mqttService.switchStates[switchIdx ?? idx] ?? false;
+        final msg       = widget.mqttService.messages[widget.idx];
+        final history   = widget.mqttService.histories[widget.idx];
+        final switchIdx = widget.mqttService.switchIdxForMeter(widget.idx);
+        final isOn      = widget.mqttService.switchStates[switchIdx ?? widget.idx] ?? false;
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(msg?.name ?? 'Appareil $idx'),
+            title: Text(msg?.name ?? 'Appareil ${widget.idx}'),
             backgroundColor: Theme.of(context).colorScheme.primary,
             foregroundColor: Theme.of(context).colorScheme.onPrimary,
           ),
@@ -40,17 +47,23 @@ class DeviceDetailScreen extends StatelessWidget {
                     const SizedBox(height: 16),
                     if (msg.isKwhMeter) ...[
                       _SwitchCard(
-                        meterIdx: idx,
-                        meterName: msg.name,
-                        switchIdx: switchIdx,
-                        isOn: isOn,
-                        mqttService: mqttService,
+                        meterIdx:   widget.idx,
+                        meterName:  msg.name,
+                        switchIdx:  switchIdx,
+                        isOn:       isOn,
+                        mqttService: widget.mqttService,
                       ),
                       const SizedBox(height: 16),
-                      _PowerChart(history: history),
+                      // ── Sélecteur de période ──────────────────────────────
+                      _WindowSelector(
+                        selected: _window,
+                        onChanged: (w) => setState(() => _window = w),
+                      ),
+                      const SizedBox(height: 12),
+                      _PowerChart(history: history, window: _window),
                       const SizedBox(height: 16),
-                      if (history != null && history.points.isNotEmpty)
-                        _HistoryTable(history: history),
+                      if (history != null && history.getPointsForWindow(_window).isNotEmpty)
+                        _HistoryTable(history: history, window: _window),
                     ],
                   ],
                 ),
@@ -255,21 +268,47 @@ class _SwitchCard extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
+// Window selector — SegmentedButton
+// ---------------------------------------------------------------------------
+
+class _WindowSelector extends StatelessWidget {
+  final HistoryWindow selected;
+  final ValueChanged<HistoryWindow> onChanged;
+
+  const _WindowSelector({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<HistoryWindow>(
+      segments: HistoryWindow.values
+          .map((w) => ButtonSegment(value: w, label: Text(w.label)))
+          .toList(),
+      selected: {selected},
+      onSelectionChanged: (s) => onChanged(s.first),
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Energy bar chart
 // ---------------------------------------------------------------------------
 
 class _PowerChart extends StatelessWidget {
   final EnergyHistory? history;
-  const _PowerChart({required this.history});
+  final HistoryWindow  window;
+  const _PowerChart({required this.history, required this.window});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final points = history?.points ?? [];
+    final theme  = Theme.of(context);
+    final points = history?.getPointsForWindow(window) ?? [];
 
     // Compute a nice Y-axis range based on energy values
-    final maxE = history?.maxEnergy ?? 1;
-    final minE = history?.minEnergy ?? 0;
+    final maxE = history?.maxEnergyFor(window) ?? 1;
+    final minE = history?.minEnergyFor(window) ?? 0;
     // Add 10% headroom; ensure a minimum span so the chart isn't flat
     final span = (maxE - minE).clamp(1.0, double.infinity);
     final chartMax = maxE + span * 0.15;
@@ -285,7 +324,7 @@ class _PowerChart extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 12),
               child: Text(
-                'Énergie consommée (Wh) — ${points.length} dernières mesures',
+                'Énergie consommée (Wh) — ${window.label}  ·  ${points.length} mesures',
                 style: theme.textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
@@ -397,13 +436,14 @@ class _PowerChart extends StatelessWidget {
 
 class _HistoryTable extends StatelessWidget {
   final EnergyHistory history;
-  const _HistoryTable({required this.history});
+  final HistoryWindow window;
+  const _HistoryTable({required this.history, required this.window});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // Show most recent first
-    final reversed = history.points.reversed.toList();
+    final theme    = Theme.of(context);
+    // Show most recent first, filtered by selected window
+    final reversed = history.getPointsForWindow(window).reversed.toList();
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -412,7 +452,7 @@ class _HistoryTable extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Historique des mesures',
+            Text('Historique — ${window.label} (${reversed.length} mesures)',
                 style: theme.textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),

@@ -93,6 +93,31 @@ class MqttService extends ChangeNotifier {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Persist / load energy histories
+  // -------------------------------------------------------------------------
+
+  /// Charge tous les historiques déjà sauvegardés en SharedPreferences.
+  /// Appelé une fois au démarrage avant la connexion MQTT.
+  Future<void> _loadAllHistories() async {
+    final prefs = await SharedPreferences.getInstance();
+    // On parcourt toutes les clés qui commencent par "history_"
+    final historyKeys = prefs.getKeys()
+        .where((k) => k.startsWith('history_'))
+        .toList();
+    for (final key in historyKeys) {
+      final idxStr = key.replaceFirst('history_', '');
+      final idx    = int.tryParse(idxStr);
+      if (idx == null) continue;
+      final h = EnergyHistory(idx);
+      await h.loadFromPrefs();
+      if (h.points.isNotEmpty) {
+        _histories[idx] = h;
+        debugPrint('[PREFS] history loaded — idx=$idx  ${h.points.length} points');
+      }
+    }
+  }
+
   /// Called from Settings when the user configures a meter→switch association.
   Future<void> setMeterSwitchMapping(int meterIdx, int switchIdx) async {
     _meterToSwitch[meterIdx] = switchIdx;
@@ -135,8 +160,9 @@ class MqttService extends ChangeNotifier {
       return;
     }
 
-    // Load persisted meter→switch mapping before connecting
+    // Load persisted meter→switch mapping and energy histories before connecting
     await _loadPersistedMeterSwitchMap();
+    await _loadAllHistories();
 
     _setStatus(MqttConnectionStatus.connecting, 'Connexion à $_brokerIp:$_port…');
 
@@ -219,8 +245,9 @@ class MqttService extends ChangeNotifier {
             'isKwhMeter=${msg.isKwhMeter} isSwitchOn=${msg.isSwitchOn}');
         _messages[msg.idx] = msg;
         if (msg.isKwhMeter) {
-          _histories.putIfAbsent(msg.idx, () => EnergyHistory(msg.idx))
-              .add(msg.powerWatts, msg.energyWh);
+          final history = _histories.putIfAbsent(msg.idx, () => EnergyHistory(msg.idx));
+          history.add(msg.powerWatts, msg.energyWh);
+          history.saveToPrefs(); // fire-and-forget — non bloquant
         }
         if (msg.isSwitch) {
           _switchStates[msg.idx] = msg.isSwitchOn;
